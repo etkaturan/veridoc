@@ -1,0 +1,31 @@
+{
+    "workbench.colorCustomizations": {
+        "titleBar.activeBackground": "#47e18c",
+        "titleBar.activeForeground": "#15161aff",
+        "titleBar.inactiveBackground": "#2e6145",
+        "titleBar.inactiveForeground": "#f5f6faff",
+        "statusBar.background": "#2e6145",
+        "statusBar.foreground": "#f5f6faff",
+        "activityBar.background": "#2e6145",
+        "activityBar.foreground": "#f5f6faff",
+        "activityBar.activeBorder": "#47e18c",
+        "terminal.ansiBlack": "#000000",
+        "terminal.ansiRed": "#cd9131",
+        "terminal.ansiGreen": "#0dbc72",
+        "terminal.ansiYellow": "#98e510",
+        "terminal.ansiBlue": "#249ec8",
+        "terminal.ansiMagenta": "#6c3fbc",
+        "terminal.ansiCyan": "#11cbcd",
+        "terminal.ansiWhite": "#e5e5e5",
+        "terminal.ansiBrightBlack": "#666666",
+        "terminal.ansiBrightRed": "#f1b14c",
+        "terminal.ansiBrightGreen": "#23d185",
+        "terminal.ansiBrightYellow": "#b4f543",
+        "terminal.ansiBrightBlue": "#3bbdea",
+        "terminal.ansiBrightMagenta": "#9570d6",
+        "terminal.ansiBrightCyan": "#29d9db",
+        "terminal.ansiBrightWhite": "#e5e5e5",
+        "terminal.background": "#08170f",
+        "terminalCursor.foreground": "#47e18c"
+    }
+}
