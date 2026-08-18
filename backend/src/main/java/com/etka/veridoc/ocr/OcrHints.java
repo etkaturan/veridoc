@@ -27,8 +27,10 @@ public record OcrHints(
         SINGLE_BLOCK(6),
         /** Treat the image as a single text line. */
         SINGLE_LINE(7),
-        /** Treat the image as a single word. */
+                /** Treat the image as a single word. */
         SINGLE_WORD(8),
+        /** Treat the image as a single character. */
+        SINGLE_CHAR(10),
         /** Full automatic page segmentation. */
         AUTOMATIC(3);
 

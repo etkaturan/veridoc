@@ -57,23 +57,52 @@ public final class MrzScannerCli {
                     lineImages.get(index).getWidth(), lineImages.get(index).getHeight());
         }
 
-        OcrResult ocr;
-        try (TesseractOcrEngine engine = TesseractOcrEngine.english()) {
-            long start = System.currentTimeMillis();
-            ocr = engine.readLines(lineImages, OcrHints.forMrz());
-            long elapsed = System.currentTimeMillis() - start;
+                // TD3 is 44 characters per line. Once other formats are supported this
+        // becomes a parameter, or a first pass that measures the character pitch.
+        final int charactersPerLine = 44;
 
-            section("OCR");
-            System.out.printf("  confidence  %.1f%s%n", ocr.meanConfidence(),
-                    ocr.isLowConfidence() ? "  (low)" : "");
-            System.out.printf("  elapsed     %d ms%n", elapsed);
-            if (!ocr.lineConfidences().isEmpty()) {
-                System.out.print("  per line   ");
-                ocr.lineConfidences().forEach(c -> System.out.printf(" %.1f", c));
-                System.out.println();
+        OcrResult ocr;
+        StringBuilder assembled = new StringBuilder();
+
+        try (TesseractOcrEngine engine = TesseractOcrEngine.english()) {
+            var reader = new com.etka.veridoc.ocr.FixedWidthLineReader(engine);
+            long start = System.currentTimeMillis();
+
+            section("OCR  (character cells)");
+
+            for (int index = 0; index < lineImages.size(); index++) {
+                var trimmed = com.etka.veridoc.ocr.ImageTrimmer.trim(lineImages.get(index));
+                if (trimmed.isEmpty()) {
+                    System.out.printf("  line %d is blank%n", index + 1);
+                    continue;
+                }
+
+                OcrResult lineResult =
+                        reader.read(trimmed.get(), charactersPerLine, OcrHints.forMrz());
+
+                assembled.append(lineResult.text()).append('\n');
+
+                System.out.printf("  line %d  confidence %.1f%n",
+                        index + 1, lineResult.meanConfidence());
+                System.out.println("    |" + lineResult.text() + "|");
+
+                // Flag the least certain cells: when a check digit fails, these
+                // are the characters to suspect first.
+                var weak = new java.util.ArrayList<String>();
+                for (int cell = 0; cell < lineResult.lineConfidences().size(); cell++) {
+                    if (lineResult.lineConfidences().get(cell) < 70.0f) {
+                        weak.add("%d:%c".formatted(cell, lineResult.text().charAt(cell)));
+                    }
+                }
+                if (!weak.isEmpty()) {
+                    System.out.println("    low confidence at " + String.join(", ", weak));
+                }
             }
-            System.out.println("  raw output:");
-            ocr.text().lines().forEach(line -> System.out.println("    |" + line + "|"));
+
+            long elapsed = System.currentTimeMillis() - start;
+            System.out.printf("  elapsed     %d ms%n", elapsed);
+
+            ocr = new OcrResult(assembled.toString(), 0.0f, List.of());
         }
 
         List<String> lines = MrzNormalizer.normalize(ocr.text());
@@ -102,6 +131,12 @@ public final class MrzScannerCli {
             System.out.println("\n  Cannot parse: " + failure.getMessage());
             System.out.println("\n  The MRZ band is probably not cropped tightly enough,");
             System.out.println("  or the image resolution is too low for a clean read.");
+            return;
+        }
+
+                if (lines.stream().anyMatch(line -> line.indexOf('?') >= 0)) {
+            System.out.println("\n  Some characters could not be read (shown as '?').");
+            System.out.println("  Check digits cannot be evaluated until every cell reads cleanly.");
             return;
         }
 
