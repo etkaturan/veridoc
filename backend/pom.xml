@@ -101,9 +101,6 @@
 				<groupId>org.codehaus.mojo</groupId>
 				<artifactId>exec-maven-plugin</artifactId>
 				<version>3.5.0</version>
-				<configuration>
-					<commandlineArgs>--enable-native-access=ALL-UNNAMED</commandlineArgs>
-				</configuration>
 			</plugin>
 		</plugins>
 	</build>
