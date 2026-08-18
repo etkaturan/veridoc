@@ -1,38 +1,47 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+		 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
+
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
 		<version>4.1.0</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
+
 	<groupId>com.etka</groupId>
 	<artifactId>veridoc</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>veridoc</name>
-	<description/>
-	<url/>
-	<licenses>
-		<license/>
-	</licenses>
-	<developers>
-		<developer/>
-	</developers>
-	<scm>
-		<connection/>
-		<developerConnection/>
-		<tag/>
-		<url/>
-	</scm>
+	<description>Identity document verification service</description>
+
 	<properties>
 		<java.version>25</java.version>
+
+		<!--
+		  Restricts native binary downloads to this platform only. Without it,
+		  Maven fetches builds for Linux, macOS, Android and Windows — well over
+		  a gigabyte. Change this value if you ever build on another OS
+		  (linux-x86_64, macosx-arm64, ...).
+		-->
+		<javacpp.platform>windows-x86_64</javacpp.platform>
+
+		<!--
+		  The suffix after the library version is the JavaCPP presets version,
+		  and it MUST match across both artifacts. Mixing 1.5.13 with 1.5.14
+		  produces link errors that are unpleasant to diagnose.
+		-->
+		<opencv.version>4.13.0-1.5.13</opencv.version>
+		<tesseract.version>5.5.2-1.5.13</tesseract.version>
 	</properties>
+
 	<dependencies>
+		<!-- ===== Spring Boot ===== -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-actuator</artifactId>
+			<artifactId>spring-boot-starter-web</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -40,9 +49,26 @@
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-webmvc</artifactId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
 
+		<!-- ===== Image processing and OCR ===== -->
+
+		<!-- Document detection, deskew, crop, thresholding. -->
+		<dependency>
+			<groupId>org.bytedeco</groupId>
+			<artifactId>opencv-platform</artifactId>
+			<version>${opencv.version}</version>
+		</dependency>
+
+		<!-- OCR engine. Bundles Tesseract and Leptonica native binaries. -->
+		<dependency>
+			<groupId>org.bytedeco</groupId>
+			<artifactId>tesseract-platform</artifactId>
+			<version>${tesseract.version}</version>
+		</dependency>
+
+		<!-- ===== Test ===== -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
@@ -55,6 +81,29 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+
+			<!--
+			  JDK 24+ restricts native library loading (JEP 472). Without this
+			  flag every test run prints a block of warnings about restricted
+			  methods. Warnings today, hard errors in a future JDK.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<argLine>--enable-native-access=ALL-UNNAMED</argLine>
+				</configuration>
+			</plugin>
+
+			<!-- Lets us run main() classes from the terminal for manual testing. -->
+			<plugin>
+				<groupId>org.codehaus.mojo</groupId>
+				<artifactId>exec-maven-plugin</artifactId>
+				<version>3.5.0</version>
+				<configuration>
+					<commandlineArgs>--enable-native-access=ALL-UNNAMED</commandlineArgs>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>
