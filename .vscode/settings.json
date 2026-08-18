@@ -27,5 +27,36 @@
         "terminal.ansiBrightWhite": "#e5e5e5",
         "terminal.background": "#08170f",
         "terminalCursor.foreground": "#47e18c"
+    },
+    "terminal.integrated.profiles.windows": {
+        "PowerShell": {
+            "source": "PowerShell",
+            "icon": "terminal-powershell"
+        },
+        "Command Prompt": {
+            "path": [
+                "${env:windir}\\Sysnative\\cmd.exe",
+                "${env:windir}\\System32\\cmd.exe"
+            ],
+            "args": [],
+            "icon": "terminal-cmd"
+        },
+        "Git Bash": {
+            "source": "Git Bash",
+            "icon": "terminal-git-bash"
+        },
+        "Sigil": {
+            "path": "powershell.exe",
+            "args": [
+                "-NoExit",
+                "-Command",
+                "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-Content -Raw -Encoding UTF8 -LiteralPath 'c:\\Users\\Gigabyte\\AppData\\Roaming\\Code\\User\\globalStorage\\etkaturan.vs-sigil\\banner-41438f.txt'; $global:SigilRoot = (Get-Location).Path; function prompt {;   $root = $global:SigilRoot;   $mark = \"$([char]27)[38;2;71;225;140m$([char]0x2588)$([char]27)[0m\";   $name = \"$([char]27)[38;2;71;225;140mveridoc$([char]27)[0m\";   $here = (Get-Location).Path;   $rel = \"\";   if ($here.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {;     $rel = $here.Substring($root.Length).TrimStart([char]92);   } else { $rel = $here };   if ($rel) { \"$mark $name $([char]0x2192) $rel> \" } else { \"$mark $name> \" }; }"
+            ],
+            "icon": "symbol-color"
+        }
+    },
+    "terminal.integrated.defaultProfile.windows": "Sigil",
+    "terminal.integrated.automationProfile.windows": {
+        "path": "powershell.exe"
     }
 }
