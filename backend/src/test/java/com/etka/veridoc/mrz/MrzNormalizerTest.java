@@ -35,7 +35,7 @@ class MrzNormalizerTest {
             "P<UTOERIKSSON<<ANNA<MARIA" + "<".repeat(19);
 
     private static final String TD3_LINE_2 =
-            "L898902C<3UTO7408122F1204159ZE184226B<<<<<10";
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
     @Test
     @DisplayName("maps guillemet variants to the canonical filler")
     void mapsFillerVariants() {
