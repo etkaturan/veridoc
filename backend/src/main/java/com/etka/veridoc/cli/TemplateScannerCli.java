@@ -56,8 +56,36 @@ public final class TemplateScannerCli {
             return;
         }
 
-        final int gridLeft = left;
-        final int gridWidth = right - left + 1;
+        // Ink bounds understate the grid: the first and last cells extend
+        // beyond the ink of the glyphs they contain. Measuring the pitch from
+        // the observed character block starts avoids that bias, and stays
+        // correct when a line begins or ends with a narrow glyph.
+        // Prefer exact geometry from a sidecar file when one exists. Inferring
+        // the grid from ink bounds is approximate: the first and last cells
+        // extend past the ink of the glyphs they contain, and that error
+        // distributes across all 44 cells.
+        int gridLeft = left;
+        int gridWidth = right - left + 1;
+        int cellCount = 44;
+
+        File sidecar = new File(args[0].replaceAll("\\.[^.]+$", "") + ".grid");
+        if (sidecar.isFile()) {
+            var properties = new java.util.Properties();
+            try (var stream = new java.io.FileInputStream(sidecar)) {
+                properties.load(stream);
+            }
+            gridLeft = Integer.parseInt(properties.getProperty("left"));
+            cellCount = Integer.parseInt(properties.getProperty("count"));
+            gridWidth = Integer.parseInt(properties.getProperty("pitch")) * cellCount;
+
+            System.out.printf("  exact grid: left=%d pitch=%s count=%d%n",
+                    gridLeft, properties.getProperty("pitch"), cellCount);
+        } else {
+            System.out.printf("  inferred grid: left=%d width=%d cell=%.3f%n",
+                    gridLeft, gridWidth, gridWidth / (double) cellCount);
+        }
+
+        final int finalCellCount = cellCount;
 
         if (System.getProperty("veridoc.grid.debug") != null) {
             System.err.printf("[grid] left=%d right=%d width=%d cellWidth=%.3f%n",
@@ -90,12 +118,15 @@ public final class TemplateScannerCli {
             }
         }
 
+        final int finalLeft = gridLeft;
+        final int finalWidth = Math.min(gridWidth, image.getWidth() - gridLeft);
+
         List<String> lines = new ArrayList<>();
         for (BufferedImage lineImage : lineImages) {
             BufferedImage aligned = lineImage.getSubimage(
-                    gridLeft, 0, gridWidth, lineImage.getHeight());
+                    finalLeft, 0, finalWidth, lineImage.getHeight());
 
-            OcrResult result = reader.read(aligned, 44);
+            OcrResult result = reader.read(aligned, finalCellCount);
             System.out.printf("  confidence %.1f%n    |%s|%n",
                     result.meanConfidence(), result.text());
             lines.add(result.text());
@@ -151,6 +182,53 @@ public final class TemplateScannerCli {
             }
         }
         return right < 0 ? null : new int[]{left, right};
+    }
+
+        /**
+     * Estimates the character pitch from the spacing between ink blocks.
+     *
+     * <p>Takes the median distance between consecutive block starts, which is
+     * robust against adjacent glyphs whose ink touches and against runs of
+     * filler that merge into one block.
+     */
+    private static int measurePitch(List<BufferedImage> lineImages, int left, int right) {
+        List<Integer> starts = new ArrayList<>();
+
+        for (BufferedImage lineImage : lineImages) {
+            boolean inInk = false;
+            for (int x = left; x <= right; x++) {
+                boolean hasInk = false;
+                for (int y = 0; y < lineImage.getHeight(); y++) {
+                    if (((lineImage.getRGB(x, y) >> 8) & 0xFF) < 128) {
+                        hasInk = true;
+                        break;
+                    }
+                }
+                if (hasInk && !inInk) {
+                    starts.add(x);
+                    inInk = true;
+                } else if (!hasInk) {
+                    inInk = false;
+                }
+            }
+        }
+
+        List<Integer> gaps = new ArrayList<>();
+        for (int index = 1; index < starts.size(); index++) {
+            int gap = starts.get(index) - starts.get(index - 1);
+            if (gap > 0) {
+                gaps.add(gap);
+            }
+        }
+
+        if (gaps.isEmpty()) {
+            return (right - left + 1) / 44;
+        }
+
+        java.util.Collections.sort(gaps);
+        // The median gap is one pitch; gaps spanning several cells (across
+        // filler runs) sit in the upper tail and do not move it.
+        return gaps.get(gaps.size() / 4);
     }
 
     private static Font resolveFont(String specification) throws Exception {

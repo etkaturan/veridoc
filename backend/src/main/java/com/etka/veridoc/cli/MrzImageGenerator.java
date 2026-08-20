@@ -40,10 +40,11 @@ public final class MrzImageGenerator {
         probeGraphics.setFont(font);
         var metrics = probeGraphics.getFontMetrics();
 
-        int widest = 0;
+        int longest = 0;
         for (String line : lines) {
-            widest = Math.max(widest, metrics.stringWidth(line));
+            longest = Math.max(longest, line.length());
         }
+        int widest = longest * metrics.charWidth('M');
         int lineHeight = metrics.getHeight();
         probeGraphics.dispose();
 
@@ -64,9 +65,23 @@ public final class MrzImageGenerator {
             graphics.setColor(Color.BLACK);
             graphics.setFont(font);
 
+            // Draw one character at a time at an exact pitch. drawString applies
+            // the font's kerning and text-layout rules, which vary spacing
+            // between glyph pairs even in a monospace font — producing an image
+            // whose characters are not on a fixed grid. A real MRZ is printed at
+            // a fixed pitch, so the generator must reproduce that exactly or the
+            // fixed-width reader has nothing correct to align to.
+            int pitch = metrics.charWidth('M');
             int baseline = MARGIN + metrics.getAscent();
+
             for (String line : lines) {
-                graphics.drawString(line, MARGIN, baseline);
+                for (int index = 0; index < line.length(); index++) {
+                    char character = line.charAt(index);
+                    // Centre each glyph within its cell, as MRZ printing does.
+                    int offset = (pitch - metrics.charWidth(character)) / 2;
+                    graphics.drawString(String.valueOf(character),
+                            MARGIN + index * pitch + offset, baseline);
+                }
                 baseline += lineHeight + LINE_SPACING;
             }
         } finally {
@@ -74,7 +89,18 @@ public final class MrzImageGenerator {
         }
 
         ImageIO.write(image, "png", output);
-        System.out.printf("Wrote %s (%d x %d)%n", output.getName(), width, height);
+
+        // Record the exact geometry used. The reader can then be tested against
+        // known-correct cell boundaries, which separates "is recognition
+        // correct" from "is grid inference correct" — two problems that are
+        // impossible to debug while both are in play.
+        File sidecar = new File(output.getPath().replaceAll("\\.[^.]+$", "") + ".grid");
+        java.nio.file.Files.writeString(sidecar.toPath(),
+                "left=%d%npitch=%d%ncount=%d%n"
+                        .formatted(MARGIN, metrics.charWidth('M'), lines[0].length()));
+
+        System.out.printf("Wrote %s (%d x %d), pitch %d px%n",
+                output.getName(), width, height, metrics.charWidth('M'));
     }
 
     /**
