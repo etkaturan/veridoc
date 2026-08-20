@@ -18,6 +18,28 @@ import java.util.List;
 @Configuration
 public class VeridocConfiguration {
 
+    /**
+     * Permits the Vite dev server to call the API during development.
+     *
+     * <p>Deliberately narrow: a specific origin, the methods actually used, and
+     * no credentials. A wildcard origin on a service that processes identity
+     * documents would let any site on the internet submit uploads through a
+     * visitor's browser.
+     */
+    @Bean
+    public org.springframework.web.servlet.config.annotation.WebMvcConfigurer corsConfigurer() {
+        return new org.springframework.web.servlet.config.annotation.WebMvcConfigurer() {
+            @Override
+            public void addCorsMappings(
+                    org.springframework.web.servlet.config.annotation.CorsRegistry registry) {
+                registry.addMapping("/api/**")
+                        .allowedOrigins("http://localhost:5173")
+                        .allowedMethods("POST")
+                        .allowCredentials(false);
+            }
+        };
+    }
+
     /** Registered as a bean so Spring discovers it for the registry below. */
     @Bean
     public Td3Parser td3Parser() {

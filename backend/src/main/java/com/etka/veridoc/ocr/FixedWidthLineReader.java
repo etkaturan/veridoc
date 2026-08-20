@@ -31,16 +31,23 @@ public final class FixedWidthLineReader {
      */
         private static final int GROUP_SIZE = 3;
 
+    /** Pixels darker than this count as ink. */
+    private static final int DARK_PIXEL_THRESHOLD = 128;
+
     /**
-     * Cells with less ink than this fraction of their area are filler.
-     *
-     * <p>Measured on rendered specimens: fillers cluster at 0.147–0.150,
-     * letters and digits span 0.177–0.403. This threshold sits in the gap.
-     * The separation is font- and size-dependent, so re-measure rather than
-     * guess when moving to real document scans — run with
-     * {@code -Dveridoc.ink.debug=true} to print the distribution.
+     * The gap between the filler cluster and the character cluster must span at
+     * least this fraction of the line's total density range to be treated as a
+     * class boundary rather than ordinary variation between characters.
      */
-    private static final double FILLER_INK_RATIO = 0.16;
+    private static final double MINIMUM_CLUSTER_GAP = 0.15;
+
+    /**
+     * The filler/character boundary must fall within this fraction of the way
+     * up the line's density range. Fillers are the lightest cells by a clear
+     * margin, so a candidate boundary above this is a gap between two kinds of
+     * character rather than a class split.
+     */
+    private static final double MAXIMUM_FILLER_DENSITY = 0.35;
     
     private final OcrEngine engine;
 
@@ -75,6 +82,26 @@ public final class FixedWidthLineReader {
 
         double cellWidth = (double) lineImage.getWidth() / characterCount;
 
+        // Measure every cell first, then derive the filler boundary from this
+        // line's own distribution. A fixed threshold only works for the exact
+        // font, size and lighting it was calibrated against; the two clusters
+        // stay clearly separated, but their absolute values move.
+        // Fillers are identified by the vertical extent of their ink, not its
+        // density. A chevron occupies a short band in the middle of the cell,
+        // while every letter and digit spans most of the cap height. Density
+        // alone cannot separate them: the digit '1' is a single thin stroke
+        // with about as much ink as a chevron.
+        double[] inkHeights = new double[characterCount];
+        for (int cell = 0; cell < characterCount; cell++) {
+            int from = (int) Math.round(cell * cellWidth);
+            int to = Math.min((int) Math.round((cell + 1) * cellWidth), lineImage.getWidth());
+            inkHeights[cell] = to > from
+                    ? inkHeightFraction(
+                            lineImage.getSubimage(from, 0, to - from, lineImage.getHeight()))
+                    : 0.0;
+        }
+        double fillerThreshold = deriveFillerThreshold(inkHeights);
+
         StringBuilder line = new StringBuilder(characterCount);
         List<Float> confidences = new ArrayList<>(characterCount);
 
@@ -88,9 +115,7 @@ public final class FixedWidthLineReader {
             int fillerEnd = Math.min((int) Math.round((index + 1) * cellWidth),
                     lineImage.getWidth());
 
-            if (fillerEnd > fillerStart
-                    && isFiller(lineImage.getSubimage(
-                            fillerStart, 0, fillerEnd - fillerStart, lineImage.getHeight()))) {
+            if (inkHeights[index] < fillerThreshold) {
                 line.append('<');
                 confidences.add(100.0f);
                 index++;
@@ -105,9 +130,7 @@ public final class FixedWidthLineReader {
                 int peekStart = (int) Math.round((index + lookahead) * cellWidth);
                 int peekEnd = Math.min((int) Math.round((index + lookahead + 1) * cellWidth),
                         lineImage.getWidth());
-                if (peekEnd > peekStart
-                        && isFiller(lineImage.getSubimage(
-                                peekStart, 0, peekEnd - peekStart, lineImage.getHeight()))) {
+                if (inkHeights[index + lookahead] < fillerThreshold) {
                     groupSize = lookahead;
                     break;
                 }
@@ -130,16 +153,43 @@ public final class FixedWidthLineReader {
                 text = groupResult.text().replaceAll("\\s", "");
                 confidence = groupResult.meanConfidence();
             }
+            if (text.length() == groupSize) {
+                for (int offset = 0; offset < groupSize; offset++) {
+                    line.append(text.charAt(offset));
+                    confidences.add(confidence);
+                }
+            } else {
+                // The group returned the wrong number of characters, so its
+                // alignment cannot be trusted. Retry each cell alone: single
+                // character reads are less accurate, but one uncertain
+                // character is recoverable through the check digits whereas a
+                // voided group of three is not.
+                OcrHints singleHints = new OcrHints(
+                        hints.characterWhitelist(),
+                        OcrHints.PageSegmentation.SINGLE_CHAR,
+                        hints.language());
 
-            // The group must yield exactly groupSize characters. If it does not,
-            // the read is untrustworthy and is marked unknown rather than
-            // shifting every subsequent character.
-            for (int offset = 0; offset < groupSize; offset++) {
-                line.append(offset < text.length() && text.length() == groupSize
-                        ? text.charAt(offset)
-                        : '?');
-                confidence = text.length() == groupSize ? confidence : 0.0f;
-                confidences.add(confidence);
+                for (int offset = 0; offset < groupSize; offset++) {
+                    int cellStart = (int) Math.round((index + offset) * cellWidth);
+                    int cellEnd = Math.min(
+                            (int) Math.round((index + offset + 1) * cellWidth),
+                            lineImage.getWidth());
+
+                    if (cellEnd <= cellStart) {
+                        line.append('?');
+                        confidences.add(0.0f);
+                        continue;
+                    }
+
+                    OcrResult single = engine.read(
+                            prepareCell(lineImage.getSubimage(
+                                    cellStart, 0, cellEnd - cellStart, lineImage.getHeight())),
+                            singleHints);
+
+                    String character = single.text().replaceAll("\\s", "");
+                    line.append(character.isEmpty() ? '?' : character.charAt(0));
+                    confidences.add(character.isEmpty() ? 0.0f : single.meanConfidence());
+                }
             }
 
             index += groupSize;
@@ -161,25 +211,83 @@ public final class FixedWidthLineReader {
      * digit. Comparing ink density against a threshold separates them without
      * involving the classifier at all.
      */
-    private static boolean isFiller(BufferedImage cell) {
-        int darkPixels = 0;
-        int total = cell.getWidth() * cell.getHeight();
+    /**
+     * The vertical extent of a cell's ink, as a fraction of the cell height.
+     *
+     * <p>Returns 0 for a cell containing no ink at all.
+     */
+    private static double inkHeightFraction(BufferedImage cell) {
+        int top = -1;
+        int bottom = -1;
 
         for (int y = 0; y < cell.getHeight(); y++) {
             for (int x = 0; x < cell.getWidth(); x++) {
-                if (((cell.getRGB(x, y) >> 8) & 0xFF) < 128) {
-                    darkPixels++;
+                if (((cell.getRGB(x, y) >> 8) & 0xFF) < DARK_PIXEL_THRESHOLD) {
+                    if (top < 0) {
+                        top = y;
+                    }
+                    bottom = y;
+                    break;
                 }
             }
         }
 
-                double ratio = (double) darkPixels / total;
+        return top < 0 ? 0.0 : (double) (bottom - top + 1) / cell.getHeight();
+    }
 
-        if (System.getProperty("veridoc.ink.debug") != null) {
-            System.err.printf("[ink] %.4f%n", ratio);
+    /**
+     * Finds the ink-density boundary separating filler cells from characters.
+     *
+     * <p>Sorts the line's cell densities and looks for the widest gap between
+     * consecutive values. Filler cells cluster tightly at a low density and
+     * every letter or digit sits well above, so that gap is the natural
+     * boundary. Requiring it to span a meaningful share of the observed range
+     * prevents a line containing no fillers from being split arbitrarily.
+     *
+     * @return a threshold below which a cell is filler, or 0 if the line has none
+     */
+    private static double deriveFillerThreshold(double[] inkRatios) {
+        double[] sorted = inkRatios.clone();
+        java.util.Arrays.sort(sorted);
+
+        double spread = sorted[sorted.length - 1] - sorted[0];
+        if (spread <= 0) {
+            return 0.0;
         }
 
-        return ratio < FILLER_INK_RATIO;
+        double widestGap = 0;
+        int gapIndex = -1;
+
+        // Fillers are always the least-inked cells, but their count varies
+        // widely — 25 of 44 on a passport's name line, 6 on the data line. So
+        // the search covers every gap and is constrained by density rather than
+        // position: the boundary must fall in the lower part of the observed
+        // range. Limiting by index instead would examine mostly real characters
+        // on a filler-sparse line and split the character cluster in two.
+        double densityLimit = sorted[0] + spread * MAXIMUM_FILLER_DENSITY;
+
+        for (int index = 0; index < sorted.length - 1; index++) {
+            if (sorted[index] > densityLimit) {
+                break;
+            }
+            double gap = sorted[index + 1] - sorted[index];
+            if (gap > widestGap) {
+                widestGap = gap;
+                gapIndex = index;
+            }
+        }
+
+        if (gapIndex < 0 || widestGap < spread * MINIMUM_CLUSTER_GAP) {
+            return 0.0;
+        }
+
+        double threshold = (sorted[gapIndex] + sorted[gapIndex + 1]) / 2.0;
+
+        if (System.getProperty("veridoc.ink.debug") != null) {
+            System.err.printf("[height] threshold %.4f (gap %.4f, spread %.4f)%n",
+                    threshold, widestGap, spread);
+        }
+        return threshold;
     }
 
     /**

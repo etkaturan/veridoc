@@ -57,6 +57,17 @@ public class DocumentVerificationService {
                             .formatted(lines.size(), lines.stream().map(String::length).toList()));
         }
 
+        long unreadable = lines.stream()
+                .flatMapToInt(String::chars)
+                .filter(character -> character == '?')
+                .count();
+
+        if (unreadable > 0) {
+            return VerificationOutcome.unreadable(
+                    "%d character(s) could not be recognised. Try a sharper or better-lit image."
+                            .formatted(unreadable));
+        }
+
         Optional<MrzParser> parser = registry.parserFor(format.get());
         if (parser.isEmpty()) {
             return VerificationOutcome.unsupported(format.get());
