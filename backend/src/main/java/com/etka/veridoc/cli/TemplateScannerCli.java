@@ -68,20 +68,14 @@ public final class TemplateScannerCli {
         int gridWidth = right - left + 1;
         int cellCount = 44;
 
-        File sidecar = new File(args[0].replaceAll("\\.[^.]+$", "") + ".grid");
-        if (sidecar.isFile()) {
-            var properties = new java.util.Properties();
-            try (var stream = new java.io.FileInputStream(sidecar)) {
-                properties.load(stream);
-            }
-            gridLeft = Integer.parseInt(properties.getProperty("left"));
-            cellCount = Integer.parseInt(properties.getProperty("count"));
-            gridWidth = Integer.parseInt(properties.getProperty("pitch")) * cellCount;
-
-            System.out.printf("  exact grid: left=%d pitch=%s count=%d%n",
-                    gridLeft, properties.getProperty("pitch"), cellCount);
+        var inferred = com.etka.veridoc.ocr.GridInference.infer(lineImages, cellCount);
+        if (inferred.isPresent()) {
+            gridLeft = inferred.get().left();
+            gridWidth = inferred.get().width();
+            System.out.printf("  inferred grid: left=%d pitch=%.3f%n",
+                    gridLeft, inferred.get().pitch());
         } else {
-            System.out.printf("  inferred grid: left=%d width=%d cell=%.3f%n",
+            System.out.printf("  fallback grid: left=%d width=%d cell=%.3f%n",
                     gridLeft, gridWidth, gridWidth / (double) cellCount);
         }
 
