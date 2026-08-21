@@ -35,6 +35,7 @@
 		-->
 		<opencv.version>4.13.0-1.5.13</opencv.version>
 		<tesseract.version>5.5.2-1.5.13</tesseract.version>
+		<testcontainers.version>1.21.3</testcontainers.version>
 	</properties>
 
 	<dependencies>
@@ -69,9 +70,57 @@
 		</dependency>
 
 		<!-- ===== Test ===== -->
+		<!-- ===== Persistence ===== -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-jpa</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.postgresql</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+		<!--
+		  Spring Boot 4 moved autoconfiguration out of the monolithic
+		  spring-boot-autoconfigure jar into per-technology modules. flyway-core
+		  on its own is just the library: without this starter there is no
+		  FlywayAutoConfiguration to invoke it, and migrations silently never
+		  run. The starter brings in flyway-core transitively.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-flyway</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-postgresql</artifactId>
+		</dependency>
+
+		<!-- ===== Test ===== -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
+		  Starts a throwaway PostgreSQL container for the test run, so the suite
+		  needs no manually managed database and exercises the real migrations,
+		  dialect and constraints rather than an in-memory substitute.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>junit-jupiter</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

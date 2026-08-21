@@ -58,5 +58,6 @@
     "terminal.integrated.defaultProfile.windows": "Sigil",
     "terminal.integrated.automationProfile.windows": {
         "path": "powershell.exe"
-    }
+    },
+    "java.configuration.updateBuildConfiguration": "automatic"
 }
