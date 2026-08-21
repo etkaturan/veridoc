@@ -1,3 +1,8 @@
+-- NOTE: the CHAR columns below are corrected to VARCHAR in V2. This file is
+-- left unchanged because it has already been applied; Flyway records a
+-- checksum per migration and editing an applied one causes a validation
+-- failure on every subsequent startup.
+
 -- Verification records deliberately hold derived facts rather than identity
 -- data. A document number is stored only as a salted hash: enough to recognise
 -- the same document returning, useless to an attacker who obtains the table.
@@ -9,14 +14,14 @@ CREATE TABLE verification_record (
 
     -- Salted hash of issuing state + document number. Identifies a repeat
     -- document without revealing which document it is.
-    document_hash       CHAR(64)     NOT NULL,
+    document_hash       VARCHAR(64)  NOT NULL,
 
     -- Salted hash of the normalised full name, for matching against a claimed
     -- identity without storing the name itself.
-    name_hash           CHAR(64)     NOT NULL,
+    name_hash           VARCHAR(64)  NOT NULL,
 
     document_format     VARCHAR(8)   NOT NULL,
-    issuing_state       CHAR(3)      NOT NULL,
+    issuing_state       VARCHAR(3)   NOT NULL,
 
     -- Whether every check digit validated at the time of verification.
     checks_passed       BOOLEAN      NOT NULL,
