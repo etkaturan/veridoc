@@ -15,8 +15,15 @@ public record VerificationOutcome(
         Optional<MrzFormat> format,
         Optional<MrzData> data,
         Optional<MrzVerification> verification,
-        Optional<String> message
+        Optional<String> message,
+        Optional<java.util.UUID> recordId
 ) {
+
+    /** Returns a copy carrying the id of the persisted record. */
+    public VerificationOutcome withRecordId(java.util.UUID id) {
+        return new VerificationOutcome(status, format, data, verification, message,
+                Optional.of(id));
+    }
 
     public enum Status {
         /** Parsed successfully; consult the check digits for trustworthiness. */
@@ -31,20 +38,21 @@ public record VerificationOutcome(
             MrzFormat format, MrzData data, MrzVerification verification) {
         return new VerificationOutcome(Status.PARSED,
                 Optional.of(format), Optional.of(data),
-                Optional.of(verification), Optional.empty());
+                Optional.of(verification), Optional.empty(), Optional.empty());
     }
 
     public static VerificationOutcome unreadable(String message) {
         return new VerificationOutcome(Status.UNREADABLE,
                 Optional.empty(), Optional.empty(),
-                Optional.empty(), Optional.of(message));
+                Optional.empty(), Optional.of(message), Optional.empty());
     }
 
     public static VerificationOutcome unsupported(MrzFormat format) {
         return new VerificationOutcome(Status.UNSUPPORTED_FORMAT,
                 Optional.of(format), Optional.empty(), Optional.empty(),
                 Optional.of("Layout %s (%s) is not yet supported"
-                        .formatted(format, format.description())));
+                        .formatted(format, format.description())),
+                Optional.empty());
     }
 
     public boolean isTrustworthy() {

@@ -23,9 +23,54 @@ import java.util.Optional;
 public class DocumentVerificationService {
 
     private final MrzParserRegistry registry;
+    private final VerificationRecordRepository repository;
+    private final IdentityHasher hasher;
 
-    public DocumentVerificationService(MrzParserRegistry registry) {
+    public DocumentVerificationService(MrzParserRegistry registry,
+                                       VerificationRecordRepository repository,
+                                       IdentityHasher hasher) {
         this.registry = registry;
+        this.repository = repository;
+        this.hasher = hasher;
+    }
+
+    /**
+     * Verifies a document and stores the derived result.
+     *
+     * <p>Persistence happens here rather than in the controller so that every
+     * caller gets a record, and so the identity data never leaves this method:
+     * the {@link MrzData} is hashed and reduced to booleans before anything is
+     * written, and is discarded when the method returns.
+     *
+     * @return the outcome, with the stored record's id when one was created
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public VerificationOutcome verifyAndRecord(java.awt.image.BufferedImage image,
+                                               LocalDate today) {
+        VerificationOutcome outcome = verify(image, today);
+
+        if (outcome.status() != VerificationOutcome.Status.PARSED) {
+            return outcome;
+        }
+
+        MrzData data = outcome.data().orElseThrow();
+        MrzVerification verification = outcome.verification().orElseThrow();
+
+        VerificationRecord record = VerificationRecord.builder()
+                .documentHash(hasher.hashDocument(data.issuingState(), data.documentNumber()))
+                .nameHash(hasher.hashName(data.surname(), data.givenNames()))
+                .documentFormat(outcome.format().orElseThrow().name())
+                .issuingState(data.issuingState())
+                .checksPassed(verification.isFullyValid())
+                .failedFields(verification.failedFields().isEmpty()
+                        ? null
+                        : verification.failedFields().toString())
+                .over18(data.isAtLeastAge(18, today))
+                .over21(data.isAtLeastAge(21, today))
+                .expiresOn(data.expiryDate().orElse(null))
+                .build();
+
+        return outcome.withRecordId(repository.save(record).getId());
     }
 
     /**
