@@ -22,6 +22,17 @@ public class ApiExceptionHandler {
         return ResponseEntity.badRequest().body(Map.of("error", failure.getMessage()));
     }
 
+    /**
+     * A request that is well-formed but not valid for the current state — for
+     * example binding a record that already has a subject, or one whose check
+     * digits failed. 409 rather than 400: the request is fine, the state is not.
+     */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, String>> conflict(IllegalStateException failure) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("error", failure.getMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> unexpected(Exception failure) {
         // Log the detail server-side; return nothing specific to the caller.

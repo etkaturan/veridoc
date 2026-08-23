@@ -61,8 +61,8 @@ public class DocumentController {
         BufferedImage image = read(file);
         LocalDate today = LocalDate.now();
 
-        VerificationOutcome outcome = service.verify(image, today);
-
+        VerificationOutcome outcome = service.verifyAndRecord(image, today);
+        
                 if (outcome.status() != VerificationOutcome.Status.PARSED) {
             return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(
                     AgeCheckResponse.failed(requiredAge, outcome.message().orElse("Unreadable")));

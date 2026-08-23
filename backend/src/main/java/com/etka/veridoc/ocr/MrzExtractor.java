@@ -40,9 +40,35 @@ public final class MrzExtractor {
         }
 
         int width = widthFor(lineImages.size());
-        FixedWidthLineReader reader = new FixedWidthLineReader(engine);
+
+        // Derive the character grid from the spacing between glyphs rather than
+        // dividing the ink span evenly. Ink bounds understate the grid — the
+        // first and last cells extend past the glyphs they contain — and that
+        // error compounds across every cell.
+        var grid = GridInference.infer(lineImages, width);
 
         List<String> lines = new ArrayList<>(lineImages.size());
+
+        if (grid.isPresent()) {
+            int left = grid.get().left();
+            int gridWidth = grid.get().width();
+            var reader = new TemplateLineReader(
+                    new TemplateMatchingEngine(new java.awt.Font("Consolas", java.awt.Font.PLAIN, 64)));
+
+            for (BufferedImage lineImage : lineImages) {
+                int usableWidth = Math.min(gridWidth, lineImage.getWidth() - left);
+                if (usableWidth <= 0) {
+                    continue;
+                }
+                lines.add(reader.read(
+                        lineImage.getSubimage(left, 0, usableWidth, lineImage.getHeight()),
+                        width).text());
+            }
+            return lines;
+        }
+
+        // No usable grid: fall back to Tesseract over the trimmed band.
+        FixedWidthLineReader reader = new FixedWidthLineReader(engine);
         for (BufferedImage lineImage : lineImages) {
             ImageTrimmer.trim(lineImage).ifPresent(trimmed ->
                     lines.add(reader.read(trimmed, width, OcrHints.forMrz()).text()));
