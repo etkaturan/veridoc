@@ -97,63 +97,43 @@ public final class BatchDiagnosticCli {
         var located = MrzBandLocator.locate(image);
         BufferedImage band = located.orElse(image);
 
-        System.setProperty("veridoc.debug.band", "true");
-        System.err.println("--- " + file.getName() + " ---");
-        List<BufferedImage> lineImages = LineSplitter.split(band);
-        System.clearProperty("veridoc.debug.band");
-
-        if (lineImages.isEmpty()) {
-            return new Result(file.getName(), located.isPresent(), 0, 0, false, false, "no lines found");
-        }
-
-        var reader = new TemplateLineReader(new TemplateMatchingEngine(templateFont));
-
-        for (int width : CANDIDATE_WIDTHS) {
-            var grid = GridInference.infer(lineImages, width);
-            if (grid.isEmpty()) continue;
-
-            int left = grid.get().left();
-            int gridWidth = grid.get().width();
-            List<String> rawLines = new ArrayList<>();
-            float totalConf = 0;
-            int n = 0;
-
-            for (BufferedImage lineImage : lineImages) {
-                int usableWidth = Math.min(gridWidth, lineImage.getWidth() - left);
-                if (usableWidth <= 0) continue;
-                OcrResult result = reader.read(
-                        lineImage.getSubimage(left, 0, usableWidth, lineImage.getHeight()), width);
-                rawLines.add(result.text());
-                totalConf += result.meanConfidence();
-                n++;
-            }
-
+        // Call the ACTUAL production extraction path — MrzExtractor — rather
+        // than a hand-rolled parallel implementation. A batch tool testing
+        // different code than the running service gives false confidence:
+        // this tool previously reimplemented splitting and grid inference
+        // directly, and diverged from real fixes made to MrzExtractor
+        // (the confidence-driven merged-line split) without anyone noticing,
+        // because it kept "passing" using its own older logic.
+        try (com.etka.veridoc.ocr.TesseractOcrEngine engine =
+                     com.etka.veridoc.ocr.TesseractOcrEngine.english()) {
+            List<String> rawLines = new com.etka.veridoc.ocr.MrzExtractor(engine).extract(band);
             List<String> normalized = MrzNormalizer.normalize(String.join("\n", rawLines));
+
             var format = MrzFormat.detect(normalized);
 
             if (format.isPresent() && format.get() == MrzFormat.TD3) {
                 var verification = new Td3Parser().verify(normalized);
                 var data = new Td3Parser().parse(normalized, LocalDate.now());
-                String note = "conf=%.1f name=%s".formatted(
-                        n == 0 ? 0 : totalConf / n,
-                        verification.isFullyValid() ? data.fullName() : "(" + verification.failedFields() + ")");
+                String note = verification.isFullyValid()
+                        ? "name=" + data.fullName()
+                        : "(" + verification.failedFields() + ")";
                 if (!verification.isFullyValid()) {
                     System.err.println("  RAW LINES for " + file.getName() + ":");
                     for (String line : normalized) {
                         System.err.println("    |" + line + "|");
                     }
                 }
-                return new Result(file.getName(), located.isPresent(), lineImages.size(),
-                        width, true, verification.isFullyValid(), note);
+                return new Result(file.getName(), located.isPresent(), normalized.size(),
+                        44, true, verification.isFullyValid(), note);
             }
             if (format.isPresent()) {
-                return new Result(file.getName(), located.isPresent(), lineImages.size(),
-                        width, true, false, "format=" + format.get() + " (parser not implemented)");
+                return new Result(file.getName(), located.isPresent(), normalized.size(),
+                        0, true, false, "format=" + format.get() + " (parser not implemented)");
             }
+            return new Result(file.getName(), located.isPresent(), normalized.size(),
+                    0, false, false, "no width produced a valid ICAO layout (lines="
+                            + normalized.size() + ")");
         }
-
-        return new Result(file.getName(), located.isPresent(), lineImages.size(),
-                0, false, false, "no width produced a valid ICAO layout");
     }
 
     private static Font loadFont() {

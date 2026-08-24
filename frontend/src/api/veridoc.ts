@@ -104,3 +104,37 @@ export async function checkSubjectAge(
   );
   return parseOrThrow<SubjectAgeResponse>(response);
 }
+
+export interface DocumentDetailResponse {
+  success: boolean;
+  message: string | null;
+  recordId: string | null;
+  format: string | null;
+  trustworthy: boolean;
+  failedChecks: string[];
+  documentCode: string | null;
+  issuingState: string | null;
+  surname: string | null;
+  givenNames: string[];
+  documentNumber: string | null;
+  nationality: string | null;
+  sex: string | null;
+  dateOfBirth: string | null;
+  expiryDate: string | null;
+  age: number | null;
+  expired: boolean | null;
+}
+
+/** Returns full structured document detail, for inspection and testing. */
+export async function getDocumentDetail(file: File): Promise<DocumentDetailResponse> {
+  const form = new FormData();
+  form.append("file", file);
+
+  const response = await fetch(`${BASE_URL}/documents/detail`, {
+    method: "POST",
+    body: form,
+  });
+
+  const body = await response.json().catch(() => null);
+  return body as DocumentDetailResponse;
+}

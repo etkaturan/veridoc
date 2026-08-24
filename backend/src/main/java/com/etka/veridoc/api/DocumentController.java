@@ -76,6 +76,33 @@ public class DocumentController {
                 meets, requiredAge, outcome.isTrustworthy(), outcome.recordId().orElse(null)));
     }
 
+    /**
+     * Returns full structured detail from a document — name, dates, document
+     * number, nationality — for inspection and testing.
+     *
+     * <p>Unlike {@link #checkAge}, this exposes the underlying identity data
+     * in full rather than a single boolean. It exists so the extraction
+     * pipeline itself can be verified end to end; the age-check endpoint
+     * remains the one intended for privacy-preserving production use.
+     */
+    @PostMapping(value = "/detail", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<DocumentDetailResponse> detail(
+            @RequestParam("file") MultipartFile file) throws IOException {
+
+        validate(file);
+
+        BufferedImage image = read(file);
+        LocalDate today = LocalDate.now();
+
+        VerificationOutcome outcome = service.verifyAndRecord(image, today);
+
+        DocumentDetailResponse response = DocumentDetailResponse.from(outcome, today);
+
+        return outcome.status() == VerificationOutcome.Status.PARSED
+                ? ResponseEntity.ok(response)
+                : ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(response);
+    }
+
     private static void validate(MultipartFile file) {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("No file was uploaded");
@@ -98,6 +125,9 @@ public class DocumentController {
             if (image == null) {
                 throw new IllegalArgumentException("File is not a decodable image");
             }
+            System.err.println("[controller] decoded upload: " + image.getWidth() + "x"
+                    + image.getHeight() + " originalFilename=" + file.getOriginalFilename()
+                    + " size=" + file.getSize() + " contentType=" + file.getContentType());
             return image;
         }
     }

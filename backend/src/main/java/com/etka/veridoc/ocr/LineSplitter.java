@@ -11,12 +11,14 @@ import java.util.List;
  * row. Rows containing text have a high count; the gaps between lines have a
  * count near zero. The boundaries between those regions are the line breaks.
  *
- * <p>Two lines set close together — common on real, tightly-typeset documents
- * — can leave no row that is genuinely ink-free: antialiasing, print bleed
- * and JPEG compression all keep a handful of dark pixels in the gap. Rather
- * than require zero ink, a second pass looks for a relative valley — a row
- * markedly lighter than the lines either side of it — inside any span tall
- * enough to plausibly be two merged lines.
+ * <p>Deliberately does not attempt to split a single tall span into multiple
+ * lines: on real photographs the two MRZ lines are often set tightly enough
+ * that no row is genuinely ink-free, and geometric guesses at where the true
+ * boundary falls (a valley search, a naive midpoint) were both measured to be
+ * unreliable across different documents. Recognising and separating a merged
+ * span is instead the job of the caller, which has the OCR tools available to
+ * judge a candidate split by whether it actually reads correctly — this class
+ * stays a simple, dependency-free geometric detector.
  *
  * <p>This is deliberately simple and assumes the text is already horizontal.
  * Deskewing belongs upstream, in the preprocessing stage.
@@ -44,28 +46,16 @@ public final class LineSplitter {
     /** Absolute floor regardless of ratio, so a single real line is never rejected. */
     private static final int MINIMUM_LINE_HEIGHT_FLOOR = 6;
 
-    /**
-     * A span at least this many times the height of the shortest confidently
-     * single-line span is treated as two merged lines. Real MRZ typesetting is
-     * often too tight for any row to register a genuine ink-density dip
-     * between the two lines — confirmed by measurement on real photographs,
-     * where the "gap" row still carried 89-98% of the surrounding lines' ink.
-     * A density-based valley search cannot reliably distinguish that from
-     * noise, so a merged pair is instead split at its geometric centre, which
-     * needs no detectable gap at all.
-     */
-    private static final double MERGED_PAIR_HEIGHT_RATIO = 1.6;
-
-    /** A small vertical margin excluded from each half after a centre split, so neither half keeps the other's descenders/ascenders. */
-    private static final int CENTRE_SPLIT_MARGIN = 2;
-
     private LineSplitter() {
         throw new AssertionError("Utility class — not meant to be instantiated");
     }
 
     /**
      * @param image a grayscale or colour image containing horizontal text lines
-     * @return one sub-image per detected line, top to bottom
+     * @return one sub-image per detected line, top to bottom. A span
+     *         containing two lines that never separated is returned as one
+     *         (taller) image; see {@link MrzExtractor} for how that case is
+     *         detected and resolved.
      */
     public static List<BufferedImage> split(BufferedImage image) {
         int width = image.getWidth();
@@ -76,7 +66,6 @@ public final class LineSplitter {
             System.err.println("[split] split() received image: " + width + "x" + height);
         }
 
-        int[] inkCount = new int[height];
         boolean[] rowHasInk = new boolean[height];
         int minimumInkPixels = (int) Math.max(1, width * INK_RATIO_THRESHOLD);
 
@@ -90,61 +79,37 @@ public final class LineSplitter {
                     count++;
                 }
             }
-            inkCount[y] = count;
             rowHasInk[y] = count >= minimumInkPixels;
         }
 
-        List<int[]> rawSpans = new ArrayList<>();
+        List<int[]> spans = new ArrayList<>();
         int lineStart = -1;
         for (int y = 0; y < height; y++) {
             if (rowHasInk[y] && lineStart < 0) {
                 lineStart = y;
             } else if (!rowHasInk[y] && lineStart >= 0) {
-                rawSpans.add(new int[]{lineStart, y});
+                spans.add(new int[]{lineStart, y});
                 lineStart = -1;
             }
         }
         if (lineStart >= 0) {
-            rawSpans.add(new int[]{lineStart, height});
+            spans.add(new int[]{lineStart, height});
         }
 
         int tallest = 0;
-        for (int[] span : rawSpans) {
+        for (int[] span : spans) {
             tallest = Math.max(tallest, span[1] - span[0]);
         }
         int minimumHeight = Math.max(
                 MINIMUM_LINE_HEIGHT_FLOOR, (int) (tallest * MINIMUM_HEIGHT_RATIO));
 
         if (debug) {
-            System.err.println("[split] raw spans found: " + rawSpans.size());
-            for (int[] span : rawSpans) {
+            System.err.println("[split] raw spans found: " + spans.size());
+            for (int[] span : spans) {
                 System.err.println("[split]   height=" + (span[1] - span[0])
                         + " y=" + span[0] + "-" + span[1]);
             }
             System.err.println("[split] tallest=" + tallest + " minimumHeight=" + minimumHeight);
-        }
-
-        // A span noticeably taller than the shortest plausible single line is
-        // very likely two MRZ lines that never separated, rather than one
-        // unusually tall line — MRZ lines within a document are uniform
-        // height. Split it at its centre; see MERGED_PAIR_HEIGHT_RATIO for why
-        // this does not attempt to locate an actual gap.
-        List<int[]> spans = new ArrayList<>();
-        for (int[] span : rawSpans) {
-            int spanHeight = span[1] - span[0];
-            if (spanHeight >= minimumHeight * MERGED_PAIR_HEIGHT_RATIO) {
-                int mid = (span[0] + span[1]) / 2;
-                spans.add(new int[]{span[0], mid - CENTRE_SPLIT_MARGIN});
-                spans.add(new int[]{mid + CENTRE_SPLIT_MARGIN, span[1]});
-                if (debug) {
-                    System.err.printf(
-                            "[split] span y=%d-%d (height=%d) exceeds %.1fx threshold, "
-                            + "centre-split at %d%n",
-                            span[0], span[1], spanHeight, MERGED_PAIR_HEIGHT_RATIO, mid);
-                }
-                continue;
-            }
-            spans.add(span);
         }
 
         List<BufferedImage> lines = new ArrayList<>();
@@ -154,6 +119,7 @@ public final class LineSplitter {
 
         return lines;
     }
+
     private static void addLine(BufferedImage source, List<BufferedImage> target,
                                 int startY, int endY, int minimumHeight) {
         if (endY - startY < minimumHeight) {

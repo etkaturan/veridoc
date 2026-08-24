@@ -130,7 +130,7 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 				<configuration>
-					<jvmArguments>--enable-native-access=ALL-UNNAMED -Dveridoc.debug.band=true</jvmArguments>
+					<jvmArguments>--enable-native-access=ALL-UNNAMED</jvmArguments>
 				</configuration>
 			</plugin>
 

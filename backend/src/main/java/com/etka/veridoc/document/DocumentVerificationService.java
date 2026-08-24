@@ -95,7 +95,7 @@ public class DocumentVerificationService {
                         : "EMPTY"));
         BufferedImage band = located.orElse(image);
 
-        if (System.getProperty("veridoc.debug.band") != null) {
+        if (true) { // always write for now — property flag has been unreliable
             java.io.File debugFile = new java.io.File("../samples/debug/located-band.png")
                     .getAbsoluteFile();
             try {

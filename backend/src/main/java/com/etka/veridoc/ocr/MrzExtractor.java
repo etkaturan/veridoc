@@ -1,5 +1,6 @@
 package com.etka.veridoc.ocr;
 
+import java.awt.Font;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,9 +16,8 @@ import java.util.Objects;
 public final class MrzExtractor {
 
     /**
-     * Characters per line, tried in order. The correct width produces lines
-     * whose check digits validate; the wrong one produces noise. TD3 is tried
-     * first because passports are the common case.
+     * Characters per line, tried in order. TD3 is tried first because
+     * passports are the common case.
      */
     private static final int[] CANDIDATE_WIDTHS = {44, 30, 36};
 
@@ -27,32 +27,21 @@ public final class MrzExtractor {
      */
     private static final float TEMPLATE_CONFIDENCE_THRESHOLD = 55.0f;
 
-    private static volatile java.awt.Font cachedTemplateFont;
+    /**
+     * A line taller than this multiple of the shortest other detected line is
+     * treated as two merged MRZ lines that never separated geometrically.
+     */
+    private static final double MERGED_HEIGHT_RATIO = 1.6;
 
-    private static java.awt.Font loadOcrBFont() {
-        java.awt.Font cached = cachedTemplateFont;
-        if (cached != null) {
-            return cached;
-        }
-        synchronized (MrzExtractor.class) {
-            if (cachedTemplateFont == null) {
-                java.io.File fontFile = new java.io.File("../samples/fonts/OCRB.ttf");
-                System.err.println("[font] looking for OCR-B at absolute path: "
-                        + fontFile.getAbsolutePath() + " exists=" + fontFile.exists());
-                try {
-                    cachedTemplateFont = java.awt.Font
-                            .createFont(java.awt.Font.TRUETYPE_FONT, fontFile)
-                            .deriveFont(java.awt.Font.PLAIN, 64f);
-                    System.err.println("[font] LOADED OCR-B successfully: "
-                            + cachedTemplateFont.getFontName());
-                } catch (Exception e) {
-                    System.err.println("[font] FAILED to load OCR-B, falling back to Consolas: " + e);
-                    cachedTemplateFont = new java.awt.Font("Consolas", java.awt.Font.PLAIN, 64);
-                }
-            }
-        }
-        return cachedTemplateFont;
-    }
+    /**
+     * When searching for the true boundary inside a merged span, candidates
+     * are tried across this fraction of the span's height, centred on the
+     * midpoint — avoiding the extreme edges, which can never be the real
+     * boundary between two roughly equal lines.
+     */
+    private static final double SPLIT_SEARCH_FRACTION = 0.5;
+
+    private static volatile Font cachedTemplateFont;
 
     private final OcrEngine engine;
 
@@ -68,38 +57,30 @@ public final class MrzExtractor {
         Objects.requireNonNull(image, "image must not be null");
 
         List<BufferedImage> lineImages = LineSplitter.split(image);
-        System.err.println("[extract] LineSplitter found " + lineImages.size() + " line(s)");
         if (lineImages.isEmpty()) {
             return List.of();
         }
 
-        int width = widthFor(lineImages.size());
-        System.err.println("[extract] chosen width=" + width);
+        Font templateFont = loadOcrBFont();
 
-        // Derive the character grid from the spacing between glyphs rather than
-        // dividing the ink span evenly. Ink bounds understate the grid — the
-        // first and last cells extend past the glyphs they contain — and that
-        // error compounds across every cell.
-        var grid = GridInference.infer(lineImages, width);
+        for (int width : CANDIDATE_WIDTHS) {
+            List<BufferedImage> resolvedLines = resolveMergedLines(lineImages, width, templateFont);
 
-        List<String> lines = new ArrayList<>(lineImages.size());
+            var grid = GridInference.infer(resolvedLines, width);
+            if (grid.isEmpty()) {
+                continue;
+            }
 
-        if (grid.isPresent()) {
             int left = grid.get().left();
             int gridWidth = grid.get().width();
-            // OCR-B is the font ICAO 9303 actually mandates for machine
-            // readable zones; Consolas was a development-time stand-in for
-            // generated test specimens and read real OCR-B documents poorly.
-            // Falls back to Consolas if the font file is not present, so this
-            // does not break environments without the OCR-B font installed.
-            java.awt.Font templateFont = loadOcrBFont();
             var reader = new TemplateLineReader(new TemplateMatchingEngine(templateFont));
 
-            List<String> templateLines = new ArrayList<>(lineImages.size());
+            List<String> templateLines = new ArrayList<>(resolvedLines.size());
             float totalConfidence = 0;
             int cellCount = 0;
             int lineIndex = 0;
-            for (BufferedImage lineImage : lineImages) {
+
+            for (BufferedImage lineImage : resolvedLines) {
                 int usableWidth = Math.min(gridWidth, lineImage.getWidth() - left);
                 if (usableWidth <= 0) {
                     lineIndex++;
@@ -114,51 +95,174 @@ public final class MrzExtractor {
                 lineIndex++;
             }
 
-            // Template matching assumes the document font matches the templates
-            // (Consolas, currently). A real OCR-B document scores poorly against
-            // the wrong font's templates — every cell picks the least-bad match
-            // rather than the right one — which shows up as low mean confidence
-            // even though a grid was found. Falling back to Tesseract in that
-            // case trades a font-specific technique for a general one rather
-            // than returning a confident wrong answer.
             float meanConfidence = cellCount == 0 ? 0 : totalConfidence / cellCount;
-            System.err.println("[extract] template meanConfidence=" + meanConfidence
-                    + " threshold=" + TEMPLATE_CONFIDENCE_THRESHOLD);
-            for (String line : templateLines) {
-                System.err.println("[extract] template line: |" + line + "|");
+            if (System.getProperty("veridoc.debug.band") != null) {
+                System.err.println("[extract] width=" + width
+                        + " meanConfidence=" + meanConfidence + " threshold=" + TEMPLATE_CONFIDENCE_THRESHOLD);
+                for (String line : templateLines) {
+                    System.err.println("[extract] template line: |" + line + "|");
+                }
             }
+
             if (meanConfidence >= TEMPLATE_CONFIDENCE_THRESHOLD) {
-                System.err.println("[extract] USING template result");
                 return templateLines;
             }
-            System.err.println("[extract] confidence too low, falling back to Tesseract");
-        } else {
-            System.err.println("[extract] no grid inferred, falling back to Tesseract");
         }
 
-        // No usable grid: fall back to Tesseract over the trimmed band.
-        FixedWidthLineReader reader = new FixedWidthLineReader(engine);
-        for (BufferedImage lineImage : lineImages) {
-            ImageTrimmer.trim(lineImage).ifPresent(trimmed ->
-                    lines.add(reader.read(trimmed, width, OcrHints.forMrz()).text()));
+        // Nothing matched confidently with template matching at any candidate
+        // width: fall back to Tesseract over each trimmed, resolved line at
+        // the first candidate width.
+        List<BufferedImage> resolvedLines = resolveMergedLines(lineImages, CANDIDATE_WIDTHS[0], templateFont);
+        List<String> lines = new ArrayList<>();
+        try {
+            var fallbackReader = new FixedWidthLineReader(engine);
+            for (BufferedImage lineImage : resolvedLines) {
+                ImageTrimmer.trim(lineImage).ifPresent(trimmed ->
+                        lines.add(fallbackReader.read(trimmed, CANDIDATE_WIDTHS[0], OcrHints.forMrz()).text()));
+            }
+        } catch (Exception e) {
+            // Tesseract unavailable or failed; return what template matching found.
+            return lines.isEmpty() ? List.of() : lines;
         }
         return lines;
     }
 
     /**
-     * Infers the character width from the line count.
+     * Detects a span that is really two MRZ lines which never separated
+     * geometrically, and resolves it by trying several candidate split
+     * heights and keeping whichever produces the most confident template
+     * match on both halves.
      *
-     * <p>In principle three lines means TD1 (30 chars) and two means TD2/TD3
-     * (36/44). In practice, LineSplitter's ink-row detection occasionally
-     * reports a spurious extra line on real photographs — a faint border, a
-     * scan artefact, noise below the true MRZ — turning a genuine two-line
-     * TD3 into an apparent three-line split. Since TD1 parsing is not yet
-     * supported by the registry anyway, defaulting to it on any 3-line split
-     * only makes a real TD3 document unreadable without ever gaining anything
-     * in return. Always try TD3 width first; grid inference and downstream
-     * check-digit validation reject it if the document genuinely is TD1.
+     * <p>Real MRZ typesetting is sometimes tight enough that no row is
+     * genuinely ink-free between the two lines (measured directly: 89-98% of
+     * the surrounding lines' own ink density), so neither a hard threshold nor
+     * a geometric midpoint reliably finds the true boundary. Reading is the
+     * one thing that can — the correct split is the one where both halves
+     * turn into recognisable MRZ text, and template matching already gives a
+     * confidence score for exactly that.
      */
-    private static int widthFor(int lineCount) {
-        return CANDIDATE_WIDTHS[0];
+    private static List<BufferedImage> resolveMergedLines(
+            List<BufferedImage> lineImages, int width, Font templateFont) {
+
+        if (lineImages.size() >= 2) {
+            return lineImages;
+        }
+        if (lineImages.size() != 1) {
+            return lineImages;
+        }
+
+        BufferedImage only = lineImages.get(0);
+        // A single detected line at roughly the height a genuine two-line MRZ
+        // block would have, given typical line spacing, is the signal that
+        // this is a merged pair rather than one real line. There is no other
+        // line in the same image to compare against here, so the threshold is
+        // absolute: an MRZ line is rarely taller than about 70px even at high
+        // photo resolution, and a merged pair is close to double that.
+        if (only.getHeight() < 50) {
+            return lineImages;
+        }
+        System.err.println("[merge-split] single tall line (" + only.getHeight()
+                + "px) being treated as a merged pair; searching for split point");
+
+        int height = only.getHeight();
+        int searchSpan = (int) (height * SPLIT_SEARCH_FRACTION);
+        int mid = height / 2;
+        int halfSpan = searchSpan / 2;
+        int searchStart = Math.max(1, mid - halfSpan);
+        int searchEnd = Math.min(height - 1, mid + halfSpan);
+        System.err.println("[merge-split] height=" + height
+                + " initial range=" + searchStart + "-" + searchEnd);
+
+        var probeEngine = new TemplateMatchingEngine(templateFont);
+        var probeReader = new TemplateLineReader(probeEngine);
+
+        int bestSplit = mid;
+        float bestScore = -1;
+
+        for (int candidate = searchStart; candidate <= searchEnd; candidate++) {
+            BufferedImage top = only.getSubimage(0, 0, only.getWidth(), candidate);
+            BufferedImage bottom = only.getSubimage(0, candidate, only.getWidth(), height - candidate);
+
+            float topConf = probeReader.read(top, width).meanConfidence();
+            float bottomConf = probeReader.read(bottom, width).meanConfidence();
+            float combined = (topConf + bottomConf) / 2;
+
+            if (combined > bestScore) {
+                bestScore = combined;
+                bestSplit = candidate;
+            }
+        }
+
+        // A winning score this low means nothing in the searched range read
+        // convincingly as MRZ text — the search found the least-bad option,
+        // not a genuine boundary. Widen the search to the full span rather
+        // than trust it, since a narrow window centred on the geometric
+        // midpoint can miss the true boundary on documents whose two lines
+        // are not evenly sized within the crop.
+        if (bestScore < 60.0f) {
+            System.err.println("[merge-split] score " + bestScore
+                    + " too low in narrow range, widening search to full height");
+            for (int candidate = 10; candidate < height - 10; candidate++) {
+                BufferedImage top = only.getSubimage(0, 0, only.getWidth(), candidate);
+                BufferedImage bottom = only.getSubimage(0, candidate, only.getWidth(), height - candidate);
+
+                float topConf = probeReader.read(top, width).meanConfidence();
+                float bottomConf = probeReader.read(bottom, width).meanConfidence();
+                float combined = (topConf + bottomConf) / 2;
+
+                if (combined > bestScore) {
+                    bestScore = combined;
+                    bestSplit = candidate;
+                }
+            }
+        }
+
+        System.err.println("[merge-split] " + only.getWidth() + "x" + only.getHeight()
+                + " best split at y=" + bestSplit
+                + " (score=" + bestScore + ") out of range " + searchStart + "-" + searchEnd);
+
+        BufferedImage topHalf = only.getSubimage(0, 0, only.getWidth(), bestSplit);
+        BufferedImage bottomHalf = only.getSubimage(
+                0, bestSplit, only.getWidth(), height - bestSplit);
+
+        return List.of(topHalf, bottomHalf);
+    }
+
+    /**
+     * Loads the OCR-B template font from disk, once, caching the result.
+     * OCR-B is the font ICAO 9303 mandates for machine readable zones; falls
+     * back to Consolas if the font file is not present, so this does not
+     * break environments without the OCR-B font installed.
+     */
+    private static Font loadOcrBFont() {
+        Font cached = cachedTemplateFont;
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (MrzExtractor.class) {
+            if (cachedTemplateFont == null) {
+                java.io.File fontFile = new java.io.File("../samples/fonts/OCRB.ttf");
+                boolean debug = System.getProperty("veridoc.debug.band") != null;
+                if (debug) {
+                    System.err.println("[font] looking for OCR-B at absolute path: "
+                            + fontFile.getAbsolutePath() + " exists=" + fontFile.exists());
+                }
+                try {
+                    cachedTemplateFont = Font
+                            .createFont(Font.TRUETYPE_FONT, fontFile)
+                            .deriveFont(Font.PLAIN, 64f);
+                    if (debug) {
+                        System.err.println("[font] LOADED OCR-B successfully: "
+                                + cachedTemplateFont.getFontName());
+                    }
+                } catch (Exception e) {
+                    if (debug) {
+                        System.err.println("[font] FAILED to load OCR-B, falling back to Consolas: " + e);
+                    }
+                    cachedTemplateFont = new Font("Consolas", Font.PLAIN, 64);
+                }
+            }
+        }
+        return cachedTemplateFont;
     }
 }
