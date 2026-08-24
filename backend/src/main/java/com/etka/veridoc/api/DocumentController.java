@@ -62,7 +62,7 @@ public class DocumentController {
         LocalDate today = LocalDate.now();
 
         VerificationOutcome outcome = service.verifyAndRecord(image, today);
-        
+
                 if (outcome.status() != VerificationOutcome.Status.PARSED) {
             return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(
                     AgeCheckResponse.failed(requiredAge, outcome.message().orElse("Unreadable")));
@@ -72,8 +72,8 @@ public class DocumentController {
                 .map(data -> data.isAtLeastAge(requiredAge, today))
                 .orElse(false);
 
-        return ResponseEntity.ok(
-                AgeCheckResponse.of(meets, requiredAge, outcome.isTrustworthy()));
+        return ResponseEntity.ok(AgeCheckResponse.of(
+                meets, requiredAge, outcome.isTrustworthy(), outcome.recordId().orElse(null)));
     }
 
     private static void validate(MultipartFile file) {

@@ -17,14 +17,16 @@ public record AgeCheckResponse(
         Boolean meetsRequirement,
         int requiredAge,
         boolean trustworthy,
-        String message
+        String message,
+        java.util.UUID recordId
 ) {
 
-    public static AgeCheckResponse of(boolean meets, int requiredAge, boolean trustworthy) {
-        return new AgeCheckResponse(meets, requiredAge, trustworthy, null);
+    public static AgeCheckResponse of(
+            boolean meets, int requiredAge, boolean trustworthy, java.util.UUID recordId) {
+        return new AgeCheckResponse(meets, requiredAge, trustworthy, null, recordId);
     }
 
     public static AgeCheckResponse failed(int requiredAge, String message) {
-        return new AgeCheckResponse(null, requiredAge, false, message);
+        return new AgeCheckResponse(null, requiredAge, false, message, null);
     }
 }

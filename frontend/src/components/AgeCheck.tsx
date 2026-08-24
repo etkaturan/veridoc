@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { checkAge, ApiError, type AgeCheckResponse } from "../api/veridoc";
+import SubjectBinding from "./SubjectBinding";
 
 const ACCEPTED = ["image/png", "image/jpeg"];
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -122,6 +123,10 @@ export default function AgeCheck() {
         This check returns only whether the age requirement is met. No date of
         birth, name, or document number is returned or stored.
       </p>
+
+      {result?.recordId && result.trustworthy && (
+        <SubjectBinding recordId={result.recordId} />
+      )}
     </div>
   );
 }
