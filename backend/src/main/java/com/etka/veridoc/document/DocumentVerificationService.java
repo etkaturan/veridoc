@@ -88,7 +88,12 @@ public class DocumentVerificationService {
         // the frame. Locate it first; if no plausible band is found, fall back
         // to treating the whole image as the band, which keeps the existing
         // behaviour for images that are already cropped to the MRZ.
-        BufferedImage band = com.etka.veridoc.ocr.MrzBandLocator.locate(image).orElse(image);
+        var located = com.etka.veridoc.ocr.MrzBandLocator.locate(image);
+        System.err.println("[service] MrzBandLocator.locate() returned: "
+                + (located.isPresent()
+                        ? located.get().getWidth() + "x" + located.get().getHeight()
+                        : "EMPTY"));
+        BufferedImage band = located.orElse(image);
 
         if (System.getProperty("veridoc.debug.band") != null) {
             java.io.File debugFile = new java.io.File("../samples/debug/located-band.png")
@@ -102,6 +107,9 @@ public class DocumentVerificationService {
                 System.err.println("[band] failed to write debug image: " + e);
             }
         }
+
+        System.err.println("[service] about to call extract() with band dimensions: "
+                + band.getWidth() + "x" + band.getHeight());
 
         List<String> rawLines;
         try (TesseractOcrEngine engine = TesseractOcrEngine.english()) {

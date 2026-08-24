@@ -234,14 +234,16 @@ public final class MrzBandLocator {
     }
 
     private static BufferedImage cropWithMargin(BufferedImage image, Rect box) {
-        // A generous vertical margin matters more than a tight crop here: if
-        // only one MRZ line surfaced as its own contour — the second line's
-        // edges were too faint, or dilation didn't bridge to it — a wide
-        // margin still pulls the neighbouring line's pixels into the crop, and
-        // LineSplitter finds it correctly on its own from there. A tight crop
-        // that misses the second line entirely cannot be recovered downstream.
-        int verticalMargin = box.height() * 3;
-        int horizontalMargin = box.height();
+        // A generous margin helps pull in a neighbouring MRZ line that failed
+        // to surface as its own contour. But scaling the margin purely from
+        // the detected line's height breaks down on smaller photographs: a
+        // margin of 3x a 96px-tall region on a 393px-tall image consumes
+        // almost the entire photo, pulling in unrelated document text (name
+        // fields, dates) that LineSplitter then treats as spurious extra
+        // lines. Capping the margin as a fraction of the image itself keeps
+        // it proportionate regardless of photo resolution.
+        int verticalMargin = Math.min(box.height() * 3, image.getHeight() / 10);
+        int horizontalMargin = Math.min(box.height(), image.getWidth() / 20);
 
         int x = Math.max(0, box.x() - horizontalMargin);
         int y = Math.max(0, box.y() - verticalMargin);

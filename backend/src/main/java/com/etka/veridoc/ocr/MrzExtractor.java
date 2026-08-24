@@ -68,11 +68,13 @@ public final class MrzExtractor {
         Objects.requireNonNull(image, "image must not be null");
 
         List<BufferedImage> lineImages = LineSplitter.split(image);
+        System.err.println("[extract] LineSplitter found " + lineImages.size() + " line(s)");
         if (lineImages.isEmpty()) {
             return List.of();
         }
 
         int width = widthFor(lineImages.size());
+        System.err.println("[extract] chosen width=" + width);
 
         // Derive the character grid from the spacing between glyphs rather than
         // dividing the ink span evenly. Ink bounds understate the grid — the
@@ -118,9 +120,18 @@ public final class MrzExtractor {
             // case trades a font-specific technique for a general one rather
             // than returning a confident wrong answer.
             float meanConfidence = cellCount == 0 ? 0 : totalConfidence / cellCount;
+            System.err.println("[extract] template meanConfidence=" + meanConfidence
+                    + " threshold=" + TEMPLATE_CONFIDENCE_THRESHOLD);
+            for (String line : templateLines) {
+                System.err.println("[extract] template line: |" + line + "|");
+            }
             if (meanConfidence >= TEMPLATE_CONFIDENCE_THRESHOLD) {
+                System.err.println("[extract] USING template result");
                 return templateLines;
             }
+            System.err.println("[extract] confidence too low, falling back to Tesseract");
+        } else {
+            System.err.println("[extract] no grid inferred, falling back to Tesseract");
         }
 
         // No usable grid: fall back to Tesseract over the trimmed band.
@@ -133,11 +144,19 @@ public final class MrzExtractor {
     }
 
     /**
-     * Infers the character width from the line count, since the three ICAO
-     * layouts are distinguishable that way: three lines means TD1, two lines
-     * means TD2 or TD3.
+     * Infers the character width from the line count.
+     *
+     * <p>In principle three lines means TD1 (30 chars) and two means TD2/TD3
+     * (36/44). In practice, LineSplitter's ink-row detection occasionally
+     * reports a spurious extra line on real photographs — a faint border, a
+     * scan artefact, noise below the true MRZ — turning a genuine two-line
+     * TD3 into an apparent three-line split. Since TD1 parsing is not yet
+     * supported by the registry anyway, defaulting to it on any 3-line split
+     * only makes a real TD3 document unreadable without ever gaining anything
+     * in return. Always try TD3 width first; grid inference and downstream
+     * check-digit validation reject it if the document genuinely is TD1.
      */
     private static int widthFor(int lineCount) {
-        return lineCount == 3 ? 30 : CANDIDATE_WIDTHS[0];
+        return CANDIDATE_WIDTHS[0];
     }
 }
