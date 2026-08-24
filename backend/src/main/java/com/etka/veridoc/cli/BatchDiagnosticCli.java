@@ -126,6 +126,21 @@ public final class BatchDiagnosticCli {
                 return new Result(file.getName(), located.isPresent(), normalized.size(),
                         44, true, verification.isFullyValid(), note);
             }
+            if (format.isPresent() && format.get() == MrzFormat.TD1) {
+                var verification = new com.etka.veridoc.mrz.Td1Parser().verify(normalized);
+                var data = new com.etka.veridoc.mrz.Td1Parser().parse(normalized, LocalDate.now());
+                String note = verification.isFullyValid()
+                        ? "name=" + data.fullName()
+                        : "(" + verification.failedFields() + ")";
+                if (!verification.isFullyValid()) {
+                    System.err.println("  RAW LINES for " + file.getName() + ":");
+                    for (String line : normalized) {
+                        System.err.println("    |" + line + "|");
+                    }
+                }
+                return new Result(file.getName(), located.isPresent(), normalized.size(),
+                        30, true, verification.isFullyValid(), note);
+            }
             if (format.isPresent()) {
                 return new Result(file.getName(), located.isPresent(), normalized.size(),
                         0, true, false, "format=" + format.get() + " (parser not implemented)");

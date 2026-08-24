@@ -2,6 +2,7 @@ package com.etka.veridoc.config;
 
 import com.etka.veridoc.mrz.MrzParser;
 import com.etka.veridoc.mrz.MrzParserRegistry;
+import com.etka.veridoc.mrz.Td1Parser;
 import com.etka.veridoc.mrz.Td3Parser;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -44,6 +45,11 @@ public class VeridocConfiguration {
     @Bean
     public Td3Parser td3Parser() {
         return new Td3Parser();
+    }
+
+    @Bean
+    public Td1Parser td1Parser() {
+        return new Td1Parser();
     }
 
     /**
