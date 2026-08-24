@@ -84,9 +84,28 @@ public class DocumentVerificationService {
         // shared singleton would corrupt results under concurrent requests. One
         // engine per call is the simple correct choice; if initialisation cost
         // becomes measurable, pool them rather than sharing one.
+        // A full document photo has the MRZ somewhere within it, not filling
+        // the frame. Locate it first; if no plausible band is found, fall back
+        // to treating the whole image as the band, which keeps the existing
+        // behaviour for images that are already cropped to the MRZ.
+        BufferedImage band = com.etka.veridoc.ocr.MrzBandLocator.locate(image).orElse(image);
+
+        if (System.getProperty("veridoc.debug.band") != null) {
+            java.io.File debugFile = new java.io.File("../samples/debug/located-band.png")
+                    .getAbsoluteFile();
+            try {
+                debugFile.getParentFile().mkdirs();
+                boolean written = javax.imageio.ImageIO.write(band, "png", debugFile);
+                System.err.printf("[band] wrote debug image: %s (success=%s)%n",
+                        debugFile, written);
+            } catch (java.io.IOException e) {
+                System.err.println("[band] failed to write debug image: " + e);
+            }
+        }
+
         List<String> rawLines;
         try (TesseractOcrEngine engine = TesseractOcrEngine.english()) {
-            rawLines = new MrzExtractor(engine).extract(image);
+            rawLines = new MrzExtractor(engine).extract(band);
         }
 
         List<String> lines = MrzNormalizer.normalize(String.join("\n", rawLines));

@@ -21,6 +21,39 @@ public final class MrzExtractor {
      */
     private static final int[] CANDIDATE_WIDTHS = {44, 30, 36};
 
+    /**
+     * Below this mean template-match confidence, the document font likely does
+     * not match the hardcoded template font, and Tesseract is tried instead.
+     */
+    private static final float TEMPLATE_CONFIDENCE_THRESHOLD = 55.0f;
+
+    private static volatile java.awt.Font cachedTemplateFont;
+
+    private static java.awt.Font loadOcrBFont() {
+        java.awt.Font cached = cachedTemplateFont;
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (MrzExtractor.class) {
+            if (cachedTemplateFont == null) {
+                java.io.File fontFile = new java.io.File("../samples/fonts/OCRB.ttf");
+                System.err.println("[font] looking for OCR-B at absolute path: "
+                        + fontFile.getAbsolutePath() + " exists=" + fontFile.exists());
+                try {
+                    cachedTemplateFont = java.awt.Font
+                            .createFont(java.awt.Font.TRUETYPE_FONT, fontFile)
+                            .deriveFont(java.awt.Font.PLAIN, 64f);
+                    System.err.println("[font] LOADED OCR-B successfully: "
+                            + cachedTemplateFont.getFontName());
+                } catch (Exception e) {
+                    System.err.println("[font] FAILED to load OCR-B, falling back to Consolas: " + e);
+                    cachedTemplateFont = new java.awt.Font("Consolas", java.awt.Font.PLAIN, 64);
+                }
+            }
+        }
+        return cachedTemplateFont;
+    }
+
     private final OcrEngine engine;
 
     public MrzExtractor(OcrEngine engine) {
@@ -52,19 +85,42 @@ public final class MrzExtractor {
         if (grid.isPresent()) {
             int left = grid.get().left();
             int gridWidth = grid.get().width();
-            var reader = new TemplateLineReader(
-                    new TemplateMatchingEngine(new java.awt.Font("Consolas", java.awt.Font.PLAIN, 64)));
+            // OCR-B is the font ICAO 9303 actually mandates for machine
+            // readable zones; Consolas was a development-time stand-in for
+            // generated test specimens and read real OCR-B documents poorly.
+            // Falls back to Consolas if the font file is not present, so this
+            // does not break environments without the OCR-B font installed.
+            java.awt.Font templateFont = loadOcrBFont();
+            var reader = new TemplateLineReader(new TemplateMatchingEngine(templateFont));
+
+            List<String> templateLines = new ArrayList<>(lineImages.size());
+            float totalConfidence = 0;
+            int cellCount = 0;
 
             for (BufferedImage lineImage : lineImages) {
                 int usableWidth = Math.min(gridWidth, lineImage.getWidth() - left);
                 if (usableWidth <= 0) {
                     continue;
                 }
-                lines.add(reader.read(
+                var result = reader.read(
                         lineImage.getSubimage(left, 0, usableWidth, lineImage.getHeight()),
-                        width).text());
+                        width);
+                templateLines.add(result.text());
+                totalConfidence += result.meanConfidence();
+                cellCount++;
             }
-            return lines;
+
+            // Template matching assumes the document font matches the templates
+            // (Consolas, currently). A real OCR-B document scores poorly against
+            // the wrong font's templates — every cell picks the least-bad match
+            // rather than the right one — which shows up as low mean confidence
+            // even though a grid was found. Falling back to Tesseract in that
+            // case trades a font-specific technique for a general one rather
+            // than returning a confident wrong answer.
+            float meanConfidence = cellCount == 0 ? 0 : totalConfidence / cellCount;
+            if (meanConfidence >= TEMPLATE_CONFIDENCE_THRESHOLD) {
+                return templateLines;
+            }
         }
 
         // No usable grid: fall back to Tesseract over the trimmed band.
