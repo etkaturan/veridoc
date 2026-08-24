@@ -34,6 +34,7 @@ public final class MrzExtractor {
 
         OcrResult result = engine.read(image, OcrHints.forMrz());
         return result.text().lines()
+                .filter(line -> line.length() >= 25)
                 .map(MrzExtractor::padToNearestValidWidth)
                 .toList();
     }
