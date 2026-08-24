@@ -64,4 +64,13 @@ public record OcrHints(
                 PageSegmentation.AUTOMATIC,
                 "eng");
     }
+
+    /**
+     * Returns a copy restricted to a narrower alphabet — for example the
+     * digits-only set legal at a specific field position — while keeping
+     * segmentation and language unchanged.
+     */
+    public OcrHints withWhitelist(String narrowerAlphabet) {
+        return new OcrHints(Optional.of(narrowerAlphabet), segmentation, language);
+    }
 }

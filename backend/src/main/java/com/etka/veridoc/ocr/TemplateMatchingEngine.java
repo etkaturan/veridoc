@@ -60,16 +60,28 @@ public final class TemplateMatchingEngine implements OcrEngine {
             return new OcrResult("<", 100.0f, java.util.List.of());
         }
 
+        // Fixed-width MRZ fields have a known legal alphabet per position —
+        // document-number and date fields are digits and '<' only, ICAO never
+        // places a letter there. Restricting the candidate templates to what
+        // the caller says is legal at this position resolves genuinely close
+        // visual ties (0 vs O being the clearest example) using information
+        // the format guarantees, rather than guessing from pixels alone.
+        String whitelist = hints.characterWhitelist().orElse(null);
+
         char best = '?';
         double bestScore = Double.MAX_VALUE;
         double runnerUp = Double.MAX_VALUE;
 
         for (Map.Entry<Character, double[]> template : templates.entrySet()) {
+            char candidate = template.getKey();
+            if (whitelist != null && whitelist.indexOf(candidate) < 0) {
+                continue;
+            }
             double score = distance(cell, template.getValue());
             if (score < bestScore) {
                 runnerUp = bestScore;
                 bestScore = score;
-                best = template.getKey();
+                best = candidate;
             } else if (score < runnerUp) {
                 runnerUp = score;
             }

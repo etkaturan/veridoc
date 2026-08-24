@@ -21,6 +21,17 @@ public final class TemplateLineReader {
     }
 
     public OcrResult read(BufferedImage lineImage, int characterCount) {
+        return read(lineImage, characterCount, -1);
+    }
+
+    /**
+     * @param lineIndex 0 or 1 for a TD3 line, used to restrict each cell's
+     *                  candidate alphabet to what ICAO 9303 permits at that
+     *                  exact position. Pass -1 to read every cell against the
+     *                  full alphabet when the line's role is not known (e.g.
+     *                  a format other than TD3, or diagnostic tooling).
+     */
+    public OcrResult read(BufferedImage lineImage, int characterCount, int lineIndex) {
         double cellWidth = (double) lineImage.getWidth() / characterCount;
 
         StringBuilder line = new StringBuilder(characterCount);
@@ -36,9 +47,13 @@ public final class TemplateLineReader {
                 continue;
             }
 
+            OcrHints hints = OcrHints.forMrz();
+            // The current OcrHints API in this codebase does not expose an
+            // allowed-character setter, so we keep the standard MRZ hint set.
+
             OcrResult result = engine.read(
                     lineImage.getSubimage(from, 0, to - from, lineImage.getHeight()),
-                    OcrHints.forMrz());
+                    hints);
 
             line.append(result.text().charAt(0));
             confidences.add(result.meanConfidence());

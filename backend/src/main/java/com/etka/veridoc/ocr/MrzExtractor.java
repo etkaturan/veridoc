@@ -98,18 +98,20 @@ public final class MrzExtractor {
             List<String> templateLines = new ArrayList<>(lineImages.size());
             float totalConfidence = 0;
             int cellCount = 0;
-
+            int lineIndex = 0;
             for (BufferedImage lineImage : lineImages) {
                 int usableWidth = Math.min(gridWidth, lineImage.getWidth() - left);
                 if (usableWidth <= 0) {
+                    lineIndex++;
                     continue;
                 }
                 var result = reader.read(
                         lineImage.getSubimage(left, 0, usableWidth, lineImage.getHeight()),
-                        width);
+                        width, lineIndex);
                 templateLines.add(result.text());
                 totalConfidence += result.meanConfidence();
                 cellCount++;
+                lineIndex++;
             }
 
             // Template matching assumes the document font matches the templates

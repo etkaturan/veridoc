@@ -44,14 +44,20 @@ public final class LineSplitter {
     /** Absolute floor regardless of ratio, so a single real line is never rejected. */
     private static final int MINIMUM_LINE_HEIGHT_FLOOR = 6;
 
-    /** A span must be at least this many times the minimum line height before a valley split is attempted. */
-    private static final double TALL_SPAN_RATIO = 1.6;
+    /**
+     * A span at least this many times the height of the shortest confidently
+     * single-line span is treated as two merged lines. Real MRZ typesetting is
+     * often too tight for any row to register a genuine ink-density dip
+     * between the two lines — confirmed by measurement on real photographs,
+     * where the "gap" row still carried 89-98% of the surrounding lines' ink.
+     * A density-based valley search cannot reliably distinguish that from
+     * noise, so a merged pair is instead split at its geometric centre, which
+     * needs no detectable gap at all.
+     */
+    private static final double MERGED_PAIR_HEIGHT_RATIO = 1.6;
 
-    /** Fraction of the span's height, at each edge, excluded from the valley search — ascenders and descenders skew the true edges. */
-    private static final double VALLEY_EDGE_MARGIN_RATIO = 0.2;
-
-    /** A row counts as a valley only if its ink is below this fraction of the span's average. */
-    private static final double VALLEY_DEPTH_RATIO = 0.55;
+    /** A small vertical margin excluded from each half after a centre split, so neither half keeps the other's descenders/ascenders. */
+    private static final int CENTRE_SPLIT_MARGIN = 2;
 
     private LineSplitter() {
         throw new AssertionError("Utility class — not meant to be instantiated");
@@ -118,19 +124,25 @@ public final class LineSplitter {
             System.err.println("[split] tallest=" + tallest + " minimumHeight=" + minimumHeight);
         }
 
-        // A span noticeably taller than the others may be two lines that
-        // never separated because the gap between them was never fully
-        // ink-free. Try a relative valley split before accepting it as one.
+        // A span noticeably taller than the shortest plausible single line is
+        // very likely two MRZ lines that never separated, rather than one
+        // unusually tall line — MRZ lines within a document are uniform
+        // height. Split it at its centre; see MERGED_PAIR_HEIGHT_RATIO for why
+        // this does not attempt to locate an actual gap.
         List<int[]> spans = new ArrayList<>();
         for (int[] span : rawSpans) {
             int spanHeight = span[1] - span[0];
-            if (spanHeight >= minimumHeight * TALL_SPAN_RATIO) {
-                int[] gap = findValleySplit(inkCount, span, debug);
-                if (gap != null) {
-                    spans.add(new int[]{span[0], gap[0]});
-                    spans.add(new int[]{gap[1], span[1]});
-                    continue;
+            if (spanHeight >= minimumHeight * MERGED_PAIR_HEIGHT_RATIO) {
+                int mid = (span[0] + span[1]) / 2;
+                spans.add(new int[]{span[0], mid - CENTRE_SPLIT_MARGIN});
+                spans.add(new int[]{mid + CENTRE_SPLIT_MARGIN, span[1]});
+                if (debug) {
+                    System.err.printf(
+                            "[split] span y=%d-%d (height=%d) exceeds %.1fx threshold, "
+                            + "centre-split at %d%n",
+                            span[0], span[1], spanHeight, MERGED_PAIR_HEIGHT_RATIO, mid);
                 }
+                continue;
             }
             spans.add(span);
         }
@@ -142,78 +154,6 @@ public final class LineSplitter {
 
         return lines;
     }
-
-    /**
-     * Looks for a relative ink-density valley within a span tall enough to
-     * plausibly be two merged lines.
-     *
-     * <p>A fixed near-zero threshold cannot find a gap where every row still
-     * carries some ink from antialiasing, print bleed or compression. This
-     * instead finds the row with the least ink relative to the span's own
-     * average: a genuine gap between two lines is markedly lower than either
-     * line's own density, even when it is not ink-free.
-     *
-     * @return {@code [gapStart, gapEnd)} to exclude from both halves, or null
-     *         if nothing convincing enough was found
-     */
-    private static int[] findValleySplit(int[] inkCount, int[] span, boolean debug) {
-        int start = span[0];
-        int end = span[1];
-        int spanHeight = end - start;
-
-        int edgeMargin = (int) (spanHeight * VALLEY_EDGE_MARGIN_RATIO);
-        int searchStart = start + edgeMargin;
-        int searchEnd = end - edgeMargin;
-
-        if (searchEnd <= searchStart) {
-            return null;
-        }
-
-        double sum = 0;
-        for (int y = start; y < end; y++) {
-            sum += inkCount[y];
-        }
-        double average = sum / spanHeight;
-
-        int valleyRow = -1;
-        int valleyCount = Integer.MAX_VALUE;
-        for (int y = searchStart; y < searchEnd; y++) {
-            if (inkCount[y] < valleyCount) {
-                valleyCount = inkCount[y];
-                valleyRow = y;
-            }
-        }
-
-        if (valleyRow < 0 || valleyCount >= average * VALLEY_DEPTH_RATIO) {
-            if (debug) {
-                System.err.printf(
-                        "[split] no valley in span y=%d-%d (best row=%d count=%d avg=%.1f)%n",
-                        start, end, valleyRow, valleyCount, average);
-            }
-            return null;
-        }
-
-        // Widen the excluded gap past the single deepest row so a genuinely
-        // blurred transition — not just one favourable pixel row — is fully
-        // excluded from both halves.
-        int gapStart = valleyRow;
-        int gapEnd = valleyRow + 1;
-        while (gapStart > start && inkCount[gapStart - 1] <= valleyCount * 1.3) {
-            gapStart--;
-        }
-        while (gapEnd < end && inkCount[gapEnd] <= valleyCount * 1.3) {
-            gapEnd++;
-        }
-
-        if (debug) {
-            System.err.printf(
-                    "[split] valley found in span y=%d-%d at row=%d (count=%d avg=%.1f), gap=%d-%d%n",
-                    start, end, valleyRow, valleyCount, average, gapStart, gapEnd);
-        }
-
-        return new int[]{gapStart, gapEnd};
-    }
-
     private static void addLine(BufferedImage source, List<BufferedImage> target,
                                 int startY, int endY, int minimumHeight) {
         if (endY - startY < minimumHeight) {
